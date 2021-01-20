@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/flashmob/go-guerrilla/log"
-	"github.com/vishalchauhan22/go-guerrilla/mail"
+	"github.com/flashmob/go-guerrilla/mail"
 	"github.com/flashmob/go-guerrilla/mail/rfc5321"
 	"github.com/flashmob/go-guerrilla/response"
 )
