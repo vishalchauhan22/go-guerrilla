@@ -54,6 +54,8 @@ type client struct {
 	connGuard sync.Mutex
 	log       log.Logger
 	parser    rfc5321.Parser
+	authReader *textproto.Reader
+	authenticated bool
 }
 
 // NewClient allocates a new client.
@@ -72,6 +74,7 @@ func NewClient(conn net.Conn, clientID uint64, logger log.Logger, envelope *mail
 
 	// used for reading the DATA state
 	c.smtpReader = textproto.NewReader(c.bufin.Reader)
+	c.authReader = textproto.NewReader(c.bufin.Reader)
 	return c
 }
 

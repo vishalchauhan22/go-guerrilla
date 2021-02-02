@@ -44,6 +44,16 @@ type Guerrilla interface {
 	SetLogger(log.Logger)
 }
 
+// type ValidateCallbackFunc
+
+type AuthenticationValidator struct {
+	handleFunctions func(username string, password string, ip string) (string, error)
+}
+
+func (v *AuthenticationValidator) AddValidator(f func(username string, password string, ip string) (string, error)) {
+	v.handleFunctions = f
+}
+
 type guerrilla struct {
 	Config  AppConfig
 	servers map[string]*server
@@ -53,6 +63,7 @@ type guerrilla struct {
 	EventHandler
 	logStore
 	backendStore
+	validator *AuthenticationValidator
 }
 
 type logStore struct {
@@ -81,10 +92,11 @@ func (ls *logStore) setMainlog(log log.Logger) {
 }
 
 // Returns a new instance of Guerrilla with the given config, not yet running. Backend started.
-func New(ac *AppConfig, b backends.Backend, l log.Logger) (Guerrilla, error) {
+func New(ac *AppConfig, b backends.Backend, l log.Logger, v *AuthenticationValidator) (Guerrilla, error) {
 	g := &guerrilla{
-		Config:  *ac, // take a local copy
-		servers: make(map[string]*server, len(ac.Servers)),
+		Config:    *ac, // take a local copy
+		servers:   make(map[string]*server, len(ac.Servers)),
+		validator: v,
 	}
 	g.backendStore.Store(b)
 	g.setMainlog(l)
@@ -133,7 +145,7 @@ func (g *guerrilla) makeServers() error {
 			continue
 		} else {
 			sc := sc // pin!
-			server, err := newServer(&sc, g.backend(), g.mainlog())
+			server, err := newServer(&sc, g.backend(), g.mainlog(), g.validator)
 			if err != nil {
 				g.mainlog().WithError(err).Errorf("Failed to create server [%s]", sc.ListenInterface)
 				errs = append(errs, err)

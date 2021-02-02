@@ -54,10 +54,11 @@ type server struct {
 	hosts           allowedHosts // stores map[string]bool for faster lookup
 	state           int
 	// If log changed after a config reload, newLogStore stores the value here until it's safe to change it
-	logStore     atomic.Value
-	mainlogStore atomic.Value
-	backendStore atomic.Value
-	envelopePool *mail.Pool
+	logStore      atomic.Value
+	mainlogStore  atomic.Value
+	backendStore  atomic.Value
+	envelopePool  *mail.Pool
+	authValidator *AuthenticationValidator
 }
 
 type allowedHosts struct {
@@ -69,18 +70,19 @@ type allowedHosts struct {
 type command []byte
 
 var (
-	cmdHELO     command = []byte("HELO")
-	cmdEHLO     command = []byte("EHLO")
-	cmdHELP     command = []byte("HELP")
-	cmdXCLIENT  command = []byte("XCLIENT")
-	cmdMAIL     command = []byte("MAIL FROM:")
-	cmdRCPT     command = []byte("RCPT TO:")
-	cmdRSET     command = []byte("RSET")
-	cmdVRFY     command = []byte("VRFY")
-	cmdNOOP     command = []byte("NOOP")
-	cmdQUIT     command = []byte("QUIT")
-	cmdDATA     command = []byte("DATA")
-	cmdSTARTTLS command = []byte("STARTTLS")
+	cmdHELO      command = []byte("HELO")
+	cmdEHLO      command = []byte("EHLO")
+	cmdHELP      command = []byte("HELP")
+	cmdXCLIENT   command = []byte("XCLIENT")
+	cmdAUTHLOGIN command = []byte("AUTH LOGIN")
+	cmdMAIL      command = []byte("MAIL FROM:")
+	cmdRCPT      command = []byte("RCPT TO:")
+	cmdRSET      command = []byte("RSET")
+	cmdVRFY      command = []byte("VRFY")
+	cmdNOOP      command = []byte("NOOP")
+	cmdQUIT      command = []byte("QUIT")
+	cmdDATA      command = []byte("DATA")
+	cmdSTARTTLS  command = []byte("STARTTLS")
 )
 
 func (c command) match(in []byte) bool {
@@ -88,13 +90,14 @@ func (c command) match(in []byte) bool {
 }
 
 // Creates and returns a new ready-to-run Server from a ServerConfig configuration
-func newServer(sc *ServerConfig, b backends.Backend, mainlog log.Logger) (*server, error) {
+func newServer(sc *ServerConfig, b backends.Backend, mainlog log.Logger, cC *AuthenticationValidator) (*server, error) {
 	server := &server{
 		clientPool:      NewPool(sc.MaxClients),
 		closedListener:  make(chan bool, 1),
 		listenInterface: sc.ListenInterface,
 		state:           ServerStateNew,
 		envelopePool:    mail.NewPool(sc.MaxClients),
+		authValidator:   cC,
 	}
 	server.mainlogStore.Store(mainlog)
 	server.backendStore.Store(b)
@@ -379,6 +382,7 @@ func (s *server) handleClient(client *client) {
 	messageSize := fmt.Sprintf("250-SIZE %d\r\n", sc.MaxSize)
 	pipelining := "250-PIPELINING\r\n"
 	advertiseTLS := "250-STARTTLS\r\n"
+	authLogin := "250-AUTH LOGIN\r\n"
 	advertiseEnhancedStatusCodes := "250-ENHANCEDSTATUSCODES\r\n"
 	// The last line doesn't need \r\n since string will be printed as a new line.
 	// Also, Last line has no dash -
@@ -462,14 +466,46 @@ func (s *server) handleClient(client *client) {
 					messageSize,
 					pipelining,
 					advertiseTLS,
+					authLogin,
 					advertiseEnhancedStatusCodes,
 					help)
 
 			case cmdHELP.match(cmd):
+				if client.authenticated != true {
+					client.sendResponse("530 Authentication Required")
+					break
+				}
 				quote := response.GetQuote()
 				client.sendResponse("214-OK\r\n", quote)
 
+			case cmdAUTHLOGIN.match(cmd):
+
+				client.bufout.WriteString("334 Username\r\n")
+				client.bufout.Flush()
+
+				username, _ := client.authReader.ReadLine()
+
+				client.bufout.WriteString("334 Password\r\n")
+				client.bufout.Flush()
+
+				password, _ := client.authReader.ReadLine()
+
+				code, _ := s.authValidator.handleFunctions(username, password, client.RemoteIP)
+				if code != "235" {
+					client.authenticated = false
+					resp := code + " Authentication Failed"
+					client.sendResponse(resp)
+					break
+				}
+				client.authenticated = true
+				client.sendResponse("235 Authentication succeeded")
+				break
+
 			case sc.XClientOn && cmdXCLIENT.match(cmd):
+				if client.authenticated != true {
+					client.sendResponse("530 Authentication Required")
+					break
+				}
 				if toks := bytes.Split(input[8:], []byte{' '}); len(toks) > 0 {
 					for i := range toks {
 						if vals := bytes.Split(toks[i], []byte{'='}); len(vals) == 2 {
@@ -488,6 +524,10 @@ func (s *server) handleClient(client *client) {
 				}
 				client.sendResponse(r.SuccessMailCmd)
 			case cmdMAIL.match(cmd):
+				if client.authenticated != true {
+					client.sendResponse("530 Authentication Required")
+					break
+				}
 				if client.isInTransaction() {
 					client.sendResponse(r.FailNestedMailCmd)
 					break
@@ -504,6 +544,10 @@ func (s *server) handleClient(client *client) {
 				client.sendResponse(r.SuccessMailCmd)
 
 			case cmdRCPT.match(cmd):
+				if client.authenticated != true {
+					client.sendResponse("530 Authentication Required")
+					break
+				}
 				if len(client.RcptTo) > rfc5321.LimitRecipients {
 					client.sendResponse(r.ErrorTooManyRecipients)
 					break
@@ -533,6 +577,10 @@ func (s *server) handleClient(client *client) {
 				client.sendResponse(r.SuccessResetCmd)
 
 			case cmdVRFY.match(cmd):
+				if client.authenticated != true {
+					client.sendResponse("530 Authentication Required")
+					break
+				}
 				client.sendResponse(r.SuccessVerifyCmd)
 
 			case cmdNOOP.match(cmd):
@@ -543,6 +591,10 @@ func (s *server) handleClient(client *client) {
 				client.kill()
 
 			case cmdDATA.match(cmd):
+				if client.authenticated != true {
+					client.sendResponse("530 Authentication Required")
+					break
+				}
 				if len(client.RcptTo) == 0 {
 					client.sendResponse(r.FailNoRecipientsDataCmd)
 					break
@@ -551,7 +603,10 @@ func (s *server) handleClient(client *client) {
 				client.state = ClientData
 
 			case sc.TLS.StartTLSOn && cmdSTARTTLS.match(cmd):
-
+				if client.authenticated != true {
+					client.sendResponse("530 Authentication Required")
+					break
+				}
 				client.sendResponse(r.SuccessStartTLSCmd)
 				client.state = ClientStartTLS
 			default:

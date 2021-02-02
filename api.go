@@ -22,6 +22,7 @@ type Daemon struct {
 
 	configLoadTime time.Time
 	subs           []deferredSub
+	Validator *AuthenticationValidator
 }
 
 type deferredSub struct {
@@ -57,7 +58,7 @@ func (d *Daemon) Start() (err error) {
 				return err
 			}
 		}
-		d.g, err = New(d.Config, d.Backend, d.Logger)
+		d.g, err = New(d.Config, d.Backend, d.Logger, d.Validator)
 		if err != nil {
 			return err
 		}
