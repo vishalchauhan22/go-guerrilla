@@ -6,21 +6,24 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"
 	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/flashmob/go-guerrilla/backends"
 	"github.com/flashmob/go-guerrilla/log"
 	"github.com/flashmob/go-guerrilla/mail"
 	"github.com/flashmob/go-guerrilla/mail/rfc5321"
 	"github.com/flashmob/go-guerrilla/response"
+	proxyproto "github.com/pires/go-proxyproto"
 )
 
 const (
@@ -249,9 +252,10 @@ func (s *server) Start(startWG *sync.WaitGroup) error {
 	s.state = ServerStateRunning
 	startWG.Done() // start successful, don't wait for me
 
+	proxyListener := &proxyproto.Listener{Listener: listener}
 	for {
 		s.log().Debugf("[%s] Waiting for a new client. Next Client ID: %d", s.listenInterface, clientID+1)
-		conn, err := listener.Accept()
+		conn, err := proxyListener.Accept()
 		clientID++
 		if err != nil {
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
@@ -490,7 +494,7 @@ func (s *server) handleClient(client *client) {
 
 				password, _ := client.authReader.ReadLine()
 
-				code, _ := s.authValidator.handleFunctions(username, password, client.RemoteIP)
+				code, p := s.authValidator.handleFunctions(username, password, client.RemoteIP)
 				if code != "235" {
 					client.authenticated = false
 					resp := code + " Authentication Failed"
@@ -498,6 +502,7 @@ func (s *server) handleClient(client *client) {
 					break
 				}
 				client.authenticated = true
+				client.Values["qPriority"] = strconv.Itoa(p)
 				client.sendResponse("235 Authentication succeeded")
 				break
 
