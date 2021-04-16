@@ -10,7 +10,11 @@ import (
 	"net/textproto"
 	"sync"
 	"time"
-
+	"strings"
+	"unicode"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
+	"unicode/utf8"
 	"github.com/flashmob/go-guerrilla/log"
 	"github.com/flashmob/go-guerrilla/mail"
 	"github.com/flashmob/go-guerrilla/mail/rfc5321"
@@ -214,6 +218,14 @@ type pathParser func([]byte) error
 func (c *client) parsePath(in []byte, p pathParser) (mail.Address, error) {
 	address := mail.Address{}
 	var err error
+	isAsc := isASCII(string(in))
+	if isAsc == false && len(in) < 330 {
+		c.Values["ogAddr"] = string(in)
+		t := transform.Chain(norm.NFD, transform.RemoveFunc(isMn), norm.NFC)
+		normAddr, _, _ := transform.String(t, string(in))
+		in = []byte(normAddr)
+	}
+	
 	if len(in) > rfc5321.LimitPath {
 		return address, errors.New(response.Canned.FailPathTooLong.String())
 	}
@@ -227,17 +239,83 @@ func (c *client) parsePath(in []byte, p pathParser) (mail.Address, error) {
 	} else if len(c.parser.Domain) > rfc5321.LimitDomain {
 		err = errors.New(response.Canned.FailDomainTooLong.String())
 	} else {
-		address = mail.Address{
-			User:       c.parser.LocalPart,
-			Host:       c.parser.Domain,
-			ADL:        c.parser.ADL,
-			PathParams: c.parser.PathParams,
-			NullPath:   c.parser.NullPath,
-			Quoted:     c.parser.LocalPartQuotes,
-			IP:         c.parser.IP,
+		if !isEmptyVal(c.Values["ogAddr"]) {
+			address = parseNewMailAddr(c.Values["ogAddr"].(string), c)
+		}else{
+			address = mail.Address{
+				User:       c.parser.LocalPart,
+				Host:       c.parser.Domain,
+				ADL:        c.parser.ADL,
+				PathParams: c.parser.PathParams,
+				NullPath:   c.parser.NullPath,
+				Quoted:     c.parser.LocalPartQuotes,
+				IP:         c.parser.IP,
+			}
 		}
 	}
 	return address, err
+}
+
+func parseNewMailAddr (emlAdr string, c *client) mail.Address {
+	spl := findInString(emlAdr, "<", ">")
+	out := strings.Split((string(spl)), "@")
+	address := mail.Address{
+		User:       out[0],
+		Host:       out[1],
+		ADL:        c.parser.ADL,
+		PathParams: c.parser.PathParams,
+		NullPath:   c.parser.NullPath,
+		Quoted:     c.parser.LocalPartQuotes,
+		IP:         c.parser.IP,
+	}
+	return address
+}
+
+func isEmptyVal(val interface{}) bool{
+	switch val.(type) {
+	case string:
+		return val == ""
+	default:
+		return val == nil
+	}
+}
+
+func findInString(str, start, end string) ([]byte) {
+	var match []byte
+    index := (strings.Index(str, start)) +1
+    for {
+        char := str[index]
+		if char != end[0]{
+			match = append(match, char)
+		}else{
+			break
+		}
+        index++
+    }
+    return match
+}
+
+func isASCII(s string) bool {
+    for i := 0; i < len(s); i++ {
+        if s[i] > unicode.MaxASCII {
+            return false
+        }
+    }
+    return true
+}
+
+func isMn(r rune) bool {
+	return unicode.Is(unicode.Mn, r) // Mn: nonspacing marks
+}
+
+func StringToAsciiBytes(s string) []byte {
+	t := make([]byte, utf8.RuneCountInString(s))
+	i := 0
+	for _, r := range s {
+		t[i] = byte(r)
+		i++
+	}
+	return t
 }
 
 func (s *server) rcptTo() (address mail.Address, err error) {

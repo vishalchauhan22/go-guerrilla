@@ -502,6 +502,7 @@ func (s *server) handleClient(client *client) {
 					break
 				}
 				client.authenticated = true
+				client.Values["client"] = username
 				client.Values["qPriority"] = strconv.Itoa(p)
 				client.sendResponse("235 Authentication succeeded")
 				break
