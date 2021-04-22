@@ -10,12 +10,11 @@ import (
 	"io/ioutil"
 	"net"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
+	b64 "encoding/base64"
 	"github.com/sirupsen/logrus"
 
 	"github.com/flashmob/go-guerrilla/backends"
@@ -475,7 +474,7 @@ func (s *server) handleClient(client *client) {
 					help)
 
 			case cmdHELP.match(cmd):
-				if client.authenticated != true {
+				if !getAuthFlag(client.Values["authenticated"]){
 					client.sendResponse("530 Authentication Required")
 					break
 				}
@@ -488,27 +487,33 @@ func (s *server) handleClient(client *client) {
 				client.bufout.Flush()
 
 				username, _ := client.authReader.ReadLine()
-
+				if IsBase64(username){
+					decStr, _ := b64.StdEncoding.DecodeString(username)
+					username = string(decStr)
+				}
 				client.bufout.WriteString("334 Password\r\n")
 				client.bufout.Flush()
 
 				password, _ := client.authReader.ReadLine()
+				if IsBase64(password){
+					decStr, _ := b64.StdEncoding.DecodeString(password)
+					password = string(decStr)
+				}
 
-				code, p := s.authValidator.handleFunctions(username, password, client.RemoteIP)
+				code, _ := s.authValidator.handleFunctions("", username, password, client.RemoteIP)
 				if code != "235" {
-					client.authenticated = false
+					client.Values["authenticated"] = false
 					resp := code + " Authentication Failed"
 					client.sendResponse(resp)
 					break
 				}
-				client.authenticated = true
+				client.Values["authenticated"] = true
 				client.Values["client"] = username
-				client.Values["qPriority"] = strconv.Itoa(p)
 				client.sendResponse("235 Authentication succeeded")
 				break
 
 			case sc.XClientOn && cmdXCLIENT.match(cmd):
-				if client.authenticated != true {
+				if !getAuthFlag(client.Values["authenticated"]){
 					client.sendResponse("530 Authentication Required")
 					break
 				}
@@ -530,10 +535,7 @@ func (s *server) handleClient(client *client) {
 				}
 				client.sendResponse(r.SuccessMailCmd)
 			case cmdMAIL.match(cmd):
-				if client.authenticated != true {
-					client.sendResponse("530 Authentication Required")
-					break
-				}
+
 				if client.isInTransaction() {
 					client.sendResponse(r.FailNestedMailCmd)
 					break
@@ -544,13 +546,26 @@ func (s *server) handleClient(client *client) {
 					client.sendResponse(err)
 					break
 				} else if client.parser.NullPath {
+
 					// bounce has empty from address
 					client.MailFrom = mail.Address{}
+				}
+
+				if !getAuthFlag(client.Values["authenticated"]) {
+					code, username := s.authValidator.handleFunctions(client.MailFrom.Host, "X", "R", client.RemoteIP)
+					if code == "235" {
+						client.Values["authenticated"] = true
+						client.Values["client"] = username
+						client.sendResponse(r.SuccessMailCmd)
+						break
+					}
+					client.sendResponse("530 Authentication Required")
+					break
 				}
 				client.sendResponse(r.SuccessMailCmd)
 
 			case cmdRCPT.match(cmd):
-				if client.authenticated != true {
+				if !getAuthFlag(client.Values["authenticated"]) {
 					client.sendResponse("530 Authentication Required")
 					break
 				}
@@ -583,7 +598,7 @@ func (s *server) handleClient(client *client) {
 				client.sendResponse(r.SuccessResetCmd)
 
 			case cmdVRFY.match(cmd):
-				if client.authenticated != true {
+				if !getAuthFlag(client.Values["authenticated"]) {
 					client.sendResponse("530 Authentication Required")
 					break
 				}
@@ -597,7 +612,7 @@ func (s *server) handleClient(client *client) {
 				client.kill()
 
 			case cmdDATA.match(cmd):
-				if client.authenticated != true {
+				if !getAuthFlag(client.Values["authenticated"]) {
 					client.sendResponse("530 Authentication Required")
 					break
 				}
@@ -609,7 +624,7 @@ func (s *server) handleClient(client *client) {
 				client.state = ClientData
 
 			case sc.TLS.StartTLSOn && cmdSTARTTLS.match(cmd):
-				if client.authenticated != true {
+				if !getAuthFlag(client.Values["authenticated"]) {
 					client.sendResponse("530 Authentication Required")
 					break
 				}
@@ -699,6 +714,20 @@ func (s *server) handleClient(client *client) {
 			}
 		}
 
+	}
+}
+
+func IsBase64(s string) bool {
+	_, err := b64.StdEncoding.DecodeString(s)
+	return err == nil
+}
+
+func getAuthFlag(val interface{}) bool {
+	switch val.(type) {
+	case bool:
+		return val == true
+	default:
+		return !(val == nil)
 	}
 }
 
