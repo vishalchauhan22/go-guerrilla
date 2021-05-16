@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	b64 "encoding/base64"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,7 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	b64 "encoding/base64"
+
 	"github.com/sirupsen/logrus"
 
 	"github.com/flashmob/go-guerrilla/backends"
@@ -474,10 +475,10 @@ func (s *server) handleClient(client *client) {
 					help)
 
 			case cmdHELP.match(cmd):
-				if !getAuthFlag(client.Values["authenticated"]){
-					client.sendResponse("530 Authentication Required")
-					break
-				}
+				// if !getAuthFlag(client.Values["authenticated"]){
+				// 	client.sendResponse("530 Authentication Required")
+				// 	break
+				// }
 				quote := response.GetQuote()
 				client.sendResponse("214-OK\r\n", quote)
 
@@ -487,7 +488,7 @@ func (s *server) handleClient(client *client) {
 				client.bufout.Flush()
 
 				username, _ := client.authReader.ReadLine()
-				if IsBase64(username){
+				if IsBase64(username) {
 					decStr, _ := b64.StdEncoding.DecodeString(username)
 					username = string(decStr)
 				}
@@ -495,7 +496,7 @@ func (s *server) handleClient(client *client) {
 				client.bufout.Flush()
 
 				password, _ := client.authReader.ReadLine()
-				if IsBase64(password){
+				if IsBase64(password) {
 					decStr, _ := b64.StdEncoding.DecodeString(password)
 					password = string(decStr)
 				}
@@ -513,10 +514,10 @@ func (s *server) handleClient(client *client) {
 				break
 
 			case sc.XClientOn && cmdXCLIENT.match(cmd):
-				if !getAuthFlag(client.Values["authenticated"]){
-					client.sendResponse("530 Authentication Required")
-					break
-				}
+				// if !getAuthFlag(client.Values["authenticated"]){
+				// 	client.sendResponse("530 Authentication Required")
+				// 	break
+				// }
 				if toks := bytes.Split(input[8:], []byte{' '}); len(toks) > 0 {
 					for i := range toks {
 						if vals := bytes.Split(toks[i], []byte{'='}); len(vals) == 2 {
@@ -565,10 +566,10 @@ func (s *server) handleClient(client *client) {
 				client.sendResponse(r.SuccessMailCmd)
 
 			case cmdRCPT.match(cmd):
-				if !getAuthFlag(client.Values["authenticated"]) {
-					client.sendResponse("530 Authentication Required")
-					break
-				}
+				// if !getAuthFlag(client.Values["authenticated"]) {
+				// 	client.sendResponse("530 Authentication Required")
+				// 	break
+				// }
 				if len(client.RcptTo) > rfc5321.LimitRecipients {
 					client.sendResponse(r.ErrorTooManyRecipients)
 					break
@@ -598,10 +599,10 @@ func (s *server) handleClient(client *client) {
 				client.sendResponse(r.SuccessResetCmd)
 
 			case cmdVRFY.match(cmd):
-				if !getAuthFlag(client.Values["authenticated"]) {
-					client.sendResponse("530 Authentication Required")
-					break
-				}
+				// if !getAuthFlag(client.Values["authenticated"]) {
+				// 	client.sendResponse("530 Authentication Required")
+				// 	break
+				// }
 				client.sendResponse(r.SuccessVerifyCmd)
 
 			case cmdNOOP.match(cmd):
@@ -624,10 +625,10 @@ func (s *server) handleClient(client *client) {
 				client.state = ClientData
 
 			case sc.TLS.StartTLSOn && cmdSTARTTLS.match(cmd):
-				if !getAuthFlag(client.Values["authenticated"]) {
-					client.sendResponse("530 Authentication Required")
-					break
-				}
+				// if !getAuthFlag(client.Values["authenticated"]) {
+				// 	client.sendResponse("530 Authentication Required")
+				// 	break
+				// }
 				client.sendResponse(r.SuccessStartTLSCmd)
 				client.state = ClientStartTLS
 			default:
