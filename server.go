@@ -23,7 +23,7 @@ import (
 	"github.com/flashmob/go-guerrilla/mail"
 	"github.com/flashmob/go-guerrilla/mail/rfc5321"
 	"github.com/flashmob/go-guerrilla/response"
-	proxyproto "github.com/pires/go-proxyproto"
+	// proxyproto "github.com/pires/go-proxyproto"
 )
 
 const (
@@ -252,10 +252,10 @@ func (s *server) Start(startWG *sync.WaitGroup) error {
 	s.state = ServerStateRunning
 	startWG.Done() // start successful, don't wait for me
 
-	proxyListener := &proxyproto.Listener{Listener: listener}
+	// proxyListener := &proxyproto.Listener{Listener: listener}
 	for {
 		s.log().Debugf("[%s] Waiting for a new client. Next Client ID: %d", s.listenInterface, clientID+1)
-		conn, err := proxyListener.Accept()
+		conn, err := listener.Accept()
 		clientID++
 		if err != nil {
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
@@ -380,7 +380,7 @@ func (s *server) handleClient(client *client) {
 
 	helo := fmt.Sprintf("250 %s Hello", sc.Hostname)
 	// ehlo is a multi-line reply and need additional \r\n at the end
-	ehlo := fmt.Sprintf("250-%s Hello\r\n", sc.Hostname)
+	ehlo := fmt.Sprintf("250 %s Hello\r\n", sc.Hostname)
 
 	// Extended feature advertisements
 	messageSize := fmt.Sprintf("250-SIZE %d\r\n", sc.MaxSize)
