@@ -18,12 +18,12 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	proxyproto "github.com/armon/go-proxyproto"
 	"github.com/flashmob/go-guerrilla/backends"
 	"github.com/flashmob/go-guerrilla/log"
 	"github.com/flashmob/go-guerrilla/mail"
 	"github.com/flashmob/go-guerrilla/mail/rfc5321"
 	"github.com/flashmob/go-guerrilla/response"
-	// proxyproto "github.com/pires/go-proxyproto"
 )
 
 const (
@@ -252,10 +252,11 @@ func (s *server) Start(startWG *sync.WaitGroup) error {
 	s.state = ServerStateRunning
 	startWG.Done() // start successful, don't wait for me
 
-	// proxyListener := &proxyproto.Listener{Listener: listener}
+	// proxyListener := &proxyproto.Listener{Listener: listener, ReadHeaderTimeout: 0}
+	proxyList := &proxyproto.Listener{Listener: listener}
 	for {
 		s.log().Debugf("[%s] Waiting for a new client. Next Client ID: %d", s.listenInterface, clientID+1)
-		conn, err := listener.Accept()
+		conn, err := proxyList.Accept()
 		clientID++
 		if err != nil {
 			if e, ok := err.(net.Error); ok && !e.Temporary() {
