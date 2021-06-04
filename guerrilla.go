@@ -47,10 +47,10 @@ type Guerrilla interface {
 // type ValidateCallbackFunc
 
 type AuthenticationValidator struct {
-	handleFunctions func(mailfrom, username, password, ip string) (string, string)
+	handleFunctions func(mailfrom, username, password, ip string) (string, string, float64)
 }
 
-func (v *AuthenticationValidator) AddValidator(f func(mailfrom, username, password, ip string) (string, string)) {
+func (v *AuthenticationValidator) AddValidator(f func(mailfrom, username, password, ip string) (string, string, float64)) {
 	v.handleFunctions = f
 }
 

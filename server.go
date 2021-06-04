@@ -18,12 +18,12 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	proxyproto "github.com/armon/go-proxyproto"
 	"github.com/flashmob/go-guerrilla/backends"
 	"github.com/flashmob/go-guerrilla/log"
 	"github.com/flashmob/go-guerrilla/mail"
 	"github.com/flashmob/go-guerrilla/mail/rfc5321"
 	"github.com/flashmob/go-guerrilla/response"
+	proxyproto "github.com/pires/go-proxyproto"
 )
 
 const (
@@ -502,14 +502,16 @@ func (s *server) handleClient(client *client) {
 					password = string(decStr)
 				}
 
-				code, _ := s.authValidator.handleFunctions("", username, password, client.RemoteIP)
+				code, _, mode := s.authValidator.handleFunctions("", username, password, client.RemoteIP)
+				fmt.Println(">>>> AUTH LOG >>>> ", code, "   ", mode)
 				if code != "235" {
-					client.Values["authenticated"] = false
+					client.Values["cred_authenticated"] = false
 					resp := code + " Authentication Failed"
 					client.sendResponse(resp)
 					break
 				}
-				client.Values["authenticated"] = true
+				client.Values["cred_authenticated"] = true
+				client.Values["auth_mode"] = mode
 				client.Values["client"] = username
 				client.sendResponse("235 Authentication succeeded")
 				break
@@ -553,10 +555,12 @@ func (s *server) handleClient(client *client) {
 					client.MailFrom = mail.Address{}
 				}
 
-				if !getAuthFlag(client.Values["authenticated"]) {
-					code, username := s.authValidator.handleFunctions(client.MailFrom.Host, "X", "R", client.RemoteIP)
+				if !getAuthFlag(client.Values["auth_mode"], client.Values["cred_authenticated"], client.Values["ip_authenticated"]) {
+					code, username, mode := s.authValidator.handleFunctions(client.MailFrom.Host, getClientName(client.Values["client"]), "R", client.RemoteIP)
+					client.Values["auth_mode"] = mode
 					if code == "235" {
-						client.Values["authenticated"] = true
+						client.Values["ip_authenticated"] = true
+						client.Values["auth_mode"] = mode
 						client.Values["client"] = username
 						client.sendResponse(r.SuccessMailCmd)
 						break
@@ -614,7 +618,7 @@ func (s *server) handleClient(client *client) {
 				client.kill()
 
 			case cmdDATA.match(cmd):
-				if !getAuthFlag(client.Values["authenticated"]) {
+				if !getAuthFlag(client.Values["auth_mode"], client.Values["cred_authenticated"], client.Values["ip_authenticated"]) {
 					client.sendResponse("530 Authentication Required")
 					break
 				}
@@ -719,17 +723,45 @@ func (s *server) handleClient(client *client) {
 	}
 }
 
+func getClientName(val interface{}) string {
+	switch val.(type) {
+	case string:
+		return val.(string)
+	default:
+		return "X"
+	}
+}
+
 func IsBase64(s string) bool {
 	_, err := b64.StdEncoding.DecodeString(s)
 	return err == nil
 }
 
-func getAuthFlag(val interface{}) bool {
+func getBoolFlag(val interface{}) bool {
 	switch val.(type) {
 	case bool:
 		return val == true
 	default:
 		return !(val == nil)
+	}
+}
+
+func getAuthFlag(mode, crVal, ipVal interface{}) bool {
+	if mode == nil {
+		return false
+	}
+
+	x := mode.(float64)
+	if x == 0.0 {
+		return getBoolFlag(crVal)
+	}
+	if x == 2.0 {
+		return getBoolFlag(crVal) && getBoolFlag(ipVal)
+	}
+	if x == 1.0 {
+		return getBoolFlag(ipVal)
+	} else {
+		return false
 	}
 }
 
