@@ -555,19 +555,6 @@ func (s *server) handleClient(client *client) {
 					client.MailFrom = mail.Address{}
 				}
 
-				if !getAuthFlag(client.Values["auth_mode"], client.Values["cred_authenticated"], client.Values["ip_authenticated"]) {
-					code, username, mode := s.authValidator.handleFunctions(client.MailFrom.Host, getClientName(client.Values["client"]), "R", client.RemoteIP)
-					client.Values["auth_mode"] = mode
-					if code == "235" {
-						client.Values["ip_authenticated"] = true
-						client.Values["auth_mode"] = mode
-						client.Values["client"] = username
-						client.sendResponse(r.SuccessMailCmd)
-						break
-					}
-					client.sendResponse("530 Authentication Required")
-					break
-				}
 				client.sendResponse(r.SuccessMailCmd)
 
 			case cmdRCPT.match(cmd):
@@ -619,8 +606,36 @@ func (s *server) handleClient(client *client) {
 
 			case cmdDATA.match(cmd):
 				if !getAuthFlag(client.Values["auth_mode"], client.Values["cred_authenticated"], client.Values["ip_authenticated"]) {
-					client.sendResponse("530 Authentication Required")
-					break
+					if client.Values["auth_mode"] != nil && client.Values["auth_mode"].(float64) > 0.0 {
+						code, username, mode := s.authValidator.handleFunctions(client.MailFrom.Host, getClientName(client.Values["client"]), "R", client.RemoteIP)
+						fmt.Println(">>>> MAIL FRM >>>> ", code, username, mode)
+						client.Values["auth_mode"] = mode
+						if code == "235" {
+							client.Values["ip_authenticated"] = true
+							client.Values["auth_mode"] = mode
+							client.Values["client"] = username
+						} else {
+							client.sendResponse("530 IP Authentication Failed")
+							break
+						}
+					} else {
+						client.sendResponse("530 Authentication Required")
+						break
+					}
+					// if !getAuthFlag(client.Values["auth_mode"], client.Values["cred_authenticated"], client.Values["ip_authenticated"]) {
+					// 	code, username, mode := s.authValidator.handleFunctions(client.MailFrom.Host, getClientName(client.Values["client"]), "R", client.RemoteIP)
+					// 	fmt.Println(">>>> MAIL FRM >>>> ", code, username, mode)
+					// 	client.Values["auth_mode"] = mode
+					// 	if code == "235" {
+					// 		client.Values["ip_authenticated"] = true
+					// 		client.Values["auth_mode"] = mode
+					// 		client.Values["client"] = username
+					// 		client.sendResponse(r.SuccessMailCmd)
+					// 		break
+					// 	}
+					// 	client.sendResponse("530 Authentication Required")
+					// 	break
+					// }
 				}
 				if len(client.RcptTo) == 0 {
 					client.sendResponse(r.FailNoRecipientsDataCmd)
