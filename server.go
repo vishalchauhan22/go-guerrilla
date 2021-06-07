@@ -554,7 +554,11 @@ func (s *server) handleClient(client *client) {
 					// bounce has empty from address
 					client.MailFrom = mail.Address{}
 				}
-
+				code, _, _ := s.authValidator.handleFunctions(client.MailFrom.Host, "0", "0", client.RemoteIP)
+				if code == "500" {
+					client.sendResponse("530 Domain Inactive")
+					break
+				}
 				client.sendResponse(r.SuccessMailCmd)
 
 			case cmdRCPT.match(cmd):
@@ -606,10 +610,19 @@ func (s *server) handleClient(client *client) {
 
 			case cmdDATA.match(cmd):
 				if !getAuthFlag(client.Values["auth_mode"], client.Values["cred_authenticated"], client.Values["ip_authenticated"]) {
-					if client.Values["auth_mode"] != nil && client.Values["auth_mode"].(float64) > 0.0 {
+					if client.Values["auth_mode"] == nil || client.Values["auth_mode"].(float64) > 0.0 {
 						code, username, mode := s.authValidator.handleFunctions(client.MailFrom.Host, getClientName(client.Values["client"]), "R", client.RemoteIP)
 						fmt.Println(">>>> MAIL FRM >>>> ", code, username, mode)
 						client.Values["auth_mode"] = mode
+
+						if !getAuthFlag(client.Values["auth_mode"], client.Values["cred_authenticated"], client.Values["ip_authenticated"]) {
+							logrus.WithFields(logrus.Fields{
+								"Domain": client.MailFrom.Host,
+								"IP":     client.RemoteIP,
+							}).Info("credentials required, ip auth received")
+							client.sendResponse("530 Authentication Required")
+							break
+						}
 						if code == "235" {
 							client.Values["ip_authenticated"] = true
 							client.Values["auth_mode"] = mode
@@ -619,6 +632,10 @@ func (s *server) handleClient(client *client) {
 							break
 						}
 					} else {
+						logrus.WithFields(logrus.Fields{
+							"Domain": client.MailFrom.Host,
+							"IP":     client.RemoteIP,
+						}).Info("ip auth failure")
 						client.sendResponse("530 Authentication Required")
 						break
 					}
